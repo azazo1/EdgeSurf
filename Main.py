@@ -1,4 +1,5 @@
 # coding=utf-8
+import os
 import sys
 import io
 
@@ -113,7 +114,7 @@ def pointsToRect(points: Sequence[Tuple[int, int]]):
     return pygame.Rect([left[0], top[1], right[0] - left[0], bottom[1] - top[1]])
 
 
-class CharControl:
+class GameControl:
     controller = pynput.keyboard.Controller()
     tapTimeSep_s = 50 * 0.001
     direction = 0.0
@@ -147,6 +148,11 @@ class CharControl:
                 cls.sleep()
                 cls.controller.tap('d')
             cls.direction = direction
+
+    @classmethod
+    def startGame(cls):
+        """开始游戏"""
+        cls.controller.tap(" ")
 
 
 class ScreenCapture:
@@ -216,7 +222,7 @@ class ScreenCapture:
         saveDC.DeleteDC()
         mfcDC.DeleteDC()
         win32gui.ReleaseDC(hwnd, hwndDC)
-        # os.remove("temp.png") todo delete
+        os.remove("temp.png")
         return cut
 
 
@@ -333,12 +339,6 @@ def test():
 
 
 def main():
-    print("g 键开始")
-    with pynput.keyboard.Listener(
-            on_press=on_key_press_function("g")
-    ) as listener:
-        listener.join()
-    print("游戏开始")
     # 初始化参数
     fps = 25
     padding = 14  # 将矩形扩大该像素，防止误差
@@ -351,8 +351,18 @@ def main():
     recordFrames = 30  # 记录失败前情景（与容错无关）
     clock = pygame.time.Clock()
     ScreenCapture.resetRange_2point(offset, captureSize)  # edge 右置区域
-    out_img_before = out_img_after = numpy.zeros((1, 1, 1))
 
+    print("打开新版 edge 浏览器，\n请打开 surf 并启用 surf 设置中的高可见性，\n启动全屏，\n然后敲击 g 键开始")
+    with pynput.keyboard.Listener(
+            on_press=on_key_press_function("g")
+    ) as listener:
+        listener.join()
+    print("等待页面加载中")
+    while sum(ScreenCapture.capture()[24, captureSize[0] - 25]) != 0:  # 若游戏加载完毕在右上角 (-25,24) 点会变纯黑色
+        clock.tick(fps)
+    print("启动中")
+    GameControl.startGame()
+    print("游戏开始")
     while True:
         src = ScreenCapture.capture()
         contours = findContours(src)
@@ -361,7 +371,7 @@ def main():
             try:
                 charRect = inflateRect(  # 扩展矩形
                     pointsToRect(  # 转换为 pygame.Rect
-                        CharacterFinder.search(src.shape[0])),  # 搜索角色，参数为捕获高度 todo 需要修改
+                        CharacterFinder.search(captureSize[1])),  # 搜索角色，参数为捕获高度
                     padding
                 )
                 break  # 直到获得charRect后停止
@@ -373,9 +383,12 @@ def main():
     print()
     hasChar = True  # 角色是否仍在屏幕中（若为 False 则超出了忍耐帧数）
     lostFrames = 0  # 角色丢失帧数
+    currentFPS = fps
+
     # 记录情景； zeros：boolean 为 False
     beforeFrames: List[numpy.ndarray] = [numpy.zeros((1, 1, 1))] * recordFrames
-    currentFPS = fps
+    out_img_after = numpy.zeros((1, 1, 1))
+
     while hasChar:
         src = ScreenCapture.capture()
         contours = findContours(src)
@@ -409,17 +422,17 @@ def main():
         for range_ in integratedRanges:
             # 判断障碍是否对着角色矩形，改变行动方向
             if range_[0] <= charRect.left and charRect.right <= range_[1]:  # 角色两边都在障碍范围内，向右
-                CharControl.changeDirection(directionLevel)
+                GameControl.changeDirection(directionLevel)
             elif range_[0] <= charRect.left <= range_[1] or \
                     range_[0] <= charRect.right <= range_[1]:  # 只有角色一边（左或右）在障碍范围内，向出路最短
                 if charRect.centerx < sum(range_) / 2:
-                    CharControl.changeDirection(-directionLevel)
+                    GameControl.changeDirection(-directionLevel)
                 else:
-                    CharControl.changeDirection(directionLevel)
+                    GameControl.changeDirection(directionLevel)
             elif charRect.left <= range_[0] <= range_[1] <= charRect.right:  # 障碍范围在角色内，向左（其他情况被上面包括）
-                CharControl.changeDirection(directionLevel)
+                GameControl.changeDirection(directionLevel)
             else:
-                CharControl.changeDirection(0)  # 向下
+                GameControl.changeDirection(0)  # 向下
                 changedDirection = False
             # 改变了方向，不再改变
             if changedDirection:
@@ -449,7 +462,7 @@ def main():
         vw = VideoWriter("record.mp4", *beforeFirst.shape[:-1][::-1], currentFPS)
         [vw.write(frame) for frame in beforeFrames]
         vw.close()
-    cv2.imwrite("fail_after.png", out_img_after)
+    cv2.imwrite("fail_after.png", out_img_after) if out_img_after else None
     cv2.destroyAllWindows()
 
 
