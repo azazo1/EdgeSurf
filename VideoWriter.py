@@ -1,6 +1,5 @@
 # coding=utf-8
 # coding=utf-8
-from __future__ import absolute_import, division, print_function
 import cv2
 import warnings
 
@@ -24,7 +23,7 @@ class VideoWriter:
 
     def write(self, frame: numpy.ndarray):
         if frame.dtype != np.uint8:  # 检查frame的类型
-            raise ValueError('frame.dtype should be np.uint8')
+            warnings.warn('frame.dtype should be np.uint8')
         # 检查frame的大小
         row, col, _ = frame.shape
         if row != self.__height or col != self.__width:

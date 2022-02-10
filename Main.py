@@ -96,13 +96,7 @@ def getCaptureRange():
     获得应该捕获的区域
     :return: 相对于左上点的偏移点(Tuple[int, int]), 捕获尺寸(Tuple[int, int])
     """
-
-    print('使焦点聚焦到 edge://surf 标签页上，然后按下 G 键')
-    with pynput.keyboard.Listener(
-            on_press=on_key_press_function("g")
-    ) as listener:
-        listener.join()
-    return (0, 0), ScreenCapture.capture().shape[:-1][::-1]
+    return (0, 0), ScreenCapture.capture().shape[:2][::-1]
 
 
 def pointsToRect(points: Sequence[Tuple[int, int]]):
@@ -117,18 +111,36 @@ def pointsToRect(points: Sequence[Tuple[int, int]]):
 class GameControl:
     controller = pynput.keyboard.Controller()
     tapTimeSep_s = 50 * 0.001
-    direction = 0.0
+    direction: Optional[int] = None
+    direction_dict = {-2: "左二级", -1: "左一级", 0: "正向下", 1: "右一级", 2: "右二级", None: "停下"}
+
+    @classmethod
+    def detectLoaded(cls) -> bool:
+        """检测页面是否加载完毕"""
+        img = ScreenCapture.capture()
+        height, width = img.shape[:2]
+        for y in range(height):
+            for x in range(width):
+                point = img[y, x]
+                if point[0] == 10 and point[1] == 128 and point[2] == 255:  # 上部心形颜色
+                    return True
+        return False
 
     @classmethod
     def sleep(cls):
         time.sleep(cls.tapTimeSep_s)
 
     @classmethod
-    def changeDirection(cls, direction: Union[float, int]):
+    def getDirectionInText(cls):
+        """获得现在方向的中文数字"""
+        return cls.direction_dict.get(cls.direction)
+
+    @classmethod
+    def changeDirection(cls, direction: Optional[int]):
         """
         *操作时请勿移动鼠标*
         通过控制键盘改变角色移动方向
-        :param direction: -2：左二级，-1：左一级，0：正向下，1：右一级，2：右二级，None：停下
+        :param direction: 见 cls.direction_dict
         """
         if direction != cls.direction:
             if direction is None:
@@ -153,6 +165,11 @@ class GameControl:
     def startGame(cls):
         """开始游戏"""
         cls.controller.tap(" ")
+
+    @classmethod
+    def refresh(cls):
+        """刷新界面"""
+        cls.controller.tap(pynput.keyboard.Key.f5)
 
 
 class ScreenCapture:
@@ -213,7 +230,7 @@ class ScreenCapture:
         im_opencv = cv2.imread(tempPic)
         cv2.cvtColor(im_opencv, cv2.COLOR_BGRA2RGB)
         leftTopX, leftTopY = cls.offset
-        size = cls.captureSize or im_opencv.shape[0:2][::-1]  # 使用默认大小
+        size = cls.captureSize or im_opencv.shape[:2][::-1]  # 使用默认大小
         capWidth = size[0]
         capHeight = size[1]
         cut = im_opencv[leftTopY:leftTopY + capHeight, leftTopX:leftTopX + capWidth]
@@ -330,38 +347,46 @@ def drawRanges(img: numpy.ndarray, *rangeLayers: Sequence[Tuple[int, int]],
         cv2.drawMarker(img, point, (0, 255, 255), markerSize=30)
     for index, ranges in enumerate(rangeLayers):
         for range_ in ranges:
-            for p in range(*range_, 5):
-                cv2.drawMarker(img, (p, drawY + index * delta), (255, 0, 0), markerSize=5)
+            cv2.line(img, (range_[0], drawY + index * delta), (range_[1], drawY + index * delta), (255, 0, 0),
+                     thickness=3)
 
 
 def test():
-    print(integrateRange(31, 1.5, [(225, 256), (243, 259), (239, 255), (336, 395), (272, 331), (432, 459), (266, 305)]))
+    # print(integrateRange(31, 1.5, [(225, 256), (243, 259), (239, 255), (336, 395), (272, 331), (432, 459), (266, 305)]))
+    while True:
+        print(GameControl.detectLoaded())
 
 
 def main():
     # 初始化参数
-    fps = 25
+    fps = 60  # 每秒读取帧数（不一定能达到）
     padding = 14  # 将矩形扩大该像素，防止误差
     directionLevel = 2  # 改变方向级数（1、2）
     ignoreGapFactor = 1.7  # 忽略缝隙系数（integrateRange 中的 k）
     tolerantFrames = 30  # 容错，允许角色丢失的最大帧数
     visibility = 10  # 视野，决定能看见角色前面多远的障碍（单位为角色高度）（不一定越大越好）
-    offset = (0, 0)  # 捕获区域的起始偏移点
-    captureSize = (1366, 768)  # 捕获区域的尺寸（建议全屏且 offset = (0,0)）
-    recordFrames = 30  # 记录失败前情景（与容错无关）
+    offset, captureSize = getCaptureRange()  # 捕获区域的起始偏移点 和 捕获区域的尺寸（建议全屏且 offset = (0,0)）
+    doRecordFrames = True  # 是否记录游戏情景
+    output = "record.mp4"  # 游戏情景的输出文件
+    fontThickness = 2  # 字厚度
+    fontScale = 4  # 子大小
+    fontColor = (255, 0, 0)  # 字色
+    fontFace = cv2.FONT_HERSHEY_PLAIN  # 字体
     clock = pygame.time.Clock()
     ScreenCapture.resetRange_2point(offset, captureSize)  # edge 右置区域
 
-    print("打开新版 edge 浏览器，\n请打开 surf 并启用 surf 设置中的高可见性，\n启动全屏，\n然后敲击 g 键开始")
+    print("打开新版 edge 浏览器，\n请打开 surf 并启用 surf 设置中的高可见性，\n启动全屏，\n然后敲击 G 键开始，\n点击 G 后请不要自己开始游戏，脚本会自动识别")
     with pynput.keyboard.Listener(
             on_press=on_key_press_function("g")
     ) as listener:
         listener.join()
     print("等待页面加载中")
-    while sum(ScreenCapture.capture()[24, captureSize[0] - 25]) != 0:  # 若游戏加载完毕在右上角 (-25,24) 点会变纯黑色
+    GameControl.refresh()  # 刷新 surf 界面
+    while GameControl.detectLoaded():  # 检测游戏是否加载完毕
         clock.tick(fps)
     print("启动中")
-    GameControl.startGame()
+    GameControl.sleep()  # 等待一会
+    GameControl.startGame()  # 开始游戏
     print("游戏开始")
     while True:
         src = ScreenCapture.capture()
@@ -381,13 +406,12 @@ def main():
         clock.tick(fps)
     print("角色取得：", charRect)
     print()
+
     hasChar = True  # 角色是否仍在屏幕中（若为 False 则超出了忍耐帧数）
     lostFrames = 0  # 角色丢失帧数
-    currentFPS = fps
-
-    # 记录情景； zeros：boolean 为 False
-    beforeFrames: List[numpy.ndarray] = [numpy.zeros((1, 1, 1))] * recordFrames
-    out_img_after = numpy.zeros((1, 1, 1))
+    frameCount = 0  # 帧计数
+    startRecordFrameNum = 120  # frameCount 达到 this 时开始记录游戏信息（防止帧率过大）
+    videoWriter = None  # type:VideoWriter  # 游戏情况记录者
 
     while hasChar:
         src = ScreenCapture.capture()
@@ -417,52 +441,63 @@ def main():
                 print(f"\r角色恢复")
                 pass
             lostFrames = 0  # 重置丢失帧数
-        # 改变方向
-        changedDirection = True
-        for range_ in integratedRanges:
-            # 判断障碍是否对着角色矩形，改变行动方向
-            if range_[0] <= charRect.left and charRect.right <= range_[1]:  # 角色两边都在障碍范围内，向右
-                GameControl.changeDirection(directionLevel)
-            elif range_[0] <= charRect.left <= range_[1] or \
-                    range_[0] <= charRect.right <= range_[1]:  # 只有角色一边（左或右）在障碍范围内，向出路最短
-                if charRect.centerx < sum(range_) / 2:
-                    GameControl.changeDirection(-directionLevel)
-                else:
-                    GameControl.changeDirection(directionLevel)
-            elif charRect.left <= range_[0] <= range_[1] <= charRect.right:  # 障碍范围在角色内，向左（其他情况被上面包括）
-                GameControl.changeDirection(directionLevel)
-            else:
-                GameControl.changeDirection(0)  # 向下
-                changedDirection = False
-            # 改变了方向，不再改变
-            if changedDirection:
-                break
 
+        # 若角色存在（严格判定，不容忍） 改变方向 并 保存图像
         if lostFrames == 0:
-            # debug: 保存角色丢失前的捕获
-            out_img_before = src.copy()
-            drawRanges(out_img_before, rectangles_xRange, *[[i] for i in integratedRanges],  # 展开成多行
-                       charRect=[charRect.topleft, charRect.topright, charRect.bottomright, charRect.bottomleft])
-            beforeFrames.append(out_img_before)
-            beforeFrames.pop(0)
+            changedDirection = True
+            for range_ in integratedRanges:
+                # 判断障碍是否对着角色矩形，改变行动方向
+                if range_[0] <= charRect.left and charRect.right <= range_[1]:  # 角色两边都在障碍范围内，向右
+                    GameControl.changeDirection(directionLevel)
+                elif range_[0] <= charRect.left <= range_[1] or \
+                        range_[0] <= charRect.right <= range_[1]:  # 只有角色一边（左或右）在障碍范围内，向出路最短
+                    if charRect.centerx < sum(range_) / 2:
+                        GameControl.changeDirection(-directionLevel)
+                    else:
+                        GameControl.changeDirection(directionLevel)
+                elif charRect.left <= range_[0] <= range_[1] <= charRect.right:  # 障碍范围在角色内，向左（其他情况被上面包括）
+                    GameControl.changeDirection(directionLevel)
+                else:
+                    GameControl.changeDirection(0)  # 向下
+                    changedDirection = False
+                # 改变了方向，不再改变
+                if changedDirection:
+                    break
+
+            if startRecordFrameNum <= frameCount:
+                if videoWriter is None:
+                    # 游戏情景记录
+                    # 通过前面的 clock.tick 得到了大概的fps
+                    videoWriter = VideoWriter(output, *ScreenCapture.captureSize, round(clock.get_fps()))
+                else:
+                    # 记录捕获的游戏情景与识别出的信息
+                    drawRanges(src, rectangles_xRange, *[[i] for i in integratedRanges],  # 展开成多行
+                               charRect=[charRect.topleft, charRect.topright, charRect.bottomright,
+                                         charRect.bottomleft])
+                    text = GameControl.getDirectionInText()
+                    size, baseline = cv2.getTextSize(text, fontFace, fontScale, fontThickness)
+                    cv2.putText(src, text, (100, 100), fontFace, fontScale, fontColor, thickness=fontThickness)
+                    videoWriter.write(src)
         # 显示
-        out_img_after = src.copy()  # debug: 保存角色丢失后的捕获
-        drawRanges(out_img_after, rectangles_xRange, *[[i] for i in integratedRanges],  # 展开成多行
-                   charRect=[charRect.topleft, charRect.topright, charRect.bottomright, charRect.bottomleft])
-        cv2.namedWindow("debug", cv2.WINDOW_FULLSCREEN)
-        cv2.imshow("debug", out_img_after)
-        cv2.waitKey(1)
+        # out_img = src.copy()
+        # drawRanges(out_img, rectangles_xRange, *[[i] for i in integratedRanges],  # 展开成多行
+        #           charRect=[charRect.topleft, charRect.topright, charRect.bottomright, charRect.bottomleft])
+        # cv2.namedWindow("debug", cv2.WINDOW_FULLSCREEN)
+        # cv2.imshow("debug", out_img)
+        # cv2.waitKey(1)
 
-        currentFPS = clock.tick(fps)
+        clock.tick(fps)  # 延迟，控制帧率
+        frameCount += 1  # 帧计数
 
-    print("角色丢失")
-    # 保存角色丢失时的图像
-    beforeFirst = beforeFrames[0]
-    if beforeFirst is not None:
-        vw = VideoWriter("record.mp4", *beforeFirst.shape[:-1][::-1], currentFPS)
-        [vw.write(frame) for frame in beforeFrames]
-        vw.close()
-    cv2.imwrite("fail_after.png", out_img_after) if out_img_after else None
+    print("角色丢失 100%")
+    if doRecordFrames:
+        print("保存图像中...")
+        # 保存角色丢失时的图像 (只是关闭输出流)
+        try:
+            videoWriter.close()
+        except AttributeError:
+            pass
+        print(f"图像保存完成 -> {os.path.abspath(output)}")
     cv2.destroyAllWindows()
 
 
