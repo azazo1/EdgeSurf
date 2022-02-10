@@ -2,10 +2,9 @@
 import os
 import sys
 import io
-import threading
 
 import time
-from typing import Sequence, List, Dict, Tuple, Optional, Union
+from typing import Sequence, List, Dict, Tuple, Optional
 import win32api
 import cv2
 import numpy
