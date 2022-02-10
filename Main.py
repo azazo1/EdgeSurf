@@ -2,6 +2,7 @@
 import os
 import sys
 import io
+import threading
 
 import time
 from typing import Sequence, List, Dict, Tuple, Optional, Union
@@ -110,9 +111,10 @@ def pointsToRect(points: Sequence[Tuple[int, int]]):
 
 class GameControl:
     controller = pynput.keyboard.Controller()
-    tapTimeSep_s = 50 * 0.001
+    tapTimeSep_s = 150 * 0.001
     direction: Optional[int] = None
-    direction_dict = {-2: "左二级", -1: "左一级", 0: "正向下", 1: "右一级", 2: "右二级", None: "停下"}
+    direction_dict_ch = {-2: "左二级", -1: "左一级", 0: "正向下", 1: "右一级", 2: "右二级", None: "停下"}
+    direction_dict_en = {-2: "Left__2", -1: "Left__1", 0: "Down", 1: "Right_1", 2: "Right_2", None: "Ceased"}
 
     @classmethod
     def detectLoaded(cls) -> bool:
@@ -132,8 +134,8 @@ class GameControl:
 
     @classmethod
     def getDirectionInText(cls):
-        """获得现在方向的中文数字"""
-        return cls.direction_dict.get(cls.direction)
+        """获得现在方向的英文解释"""
+        return cls.direction_dict_en.get(cls.direction)
 
     @classmethod
     def changeDirection(cls, direction: Optional[int]):
@@ -142,24 +144,25 @@ class GameControl:
         通过控制键盘改变角色移动方向
         :param direction: 见 cls.direction_dict
         """
-        if direction != cls.direction:
-            if direction is None:
-                cls.controller.tap("w")
-            elif direction == -2:
-                cls.controller.tap('a')
-                cls.sleep()
-                cls.controller.tap('a')
-            elif direction == -1:
-                cls.controller.tap('a')
-            elif direction == -0:
-                cls.controller.tap('s')
-            elif direction == 1:
-                cls.controller.tap('d')
-            elif direction == 2:
-                cls.controller.tap('d')
-                cls.sleep()
-                cls.controller.tap('d')
-            cls.direction = direction
+        if direction is None:
+            cls.controller.tap("w")
+        elif direction == -2:
+            cls.controller.tap('a')
+            cls.sleep()
+            cls.controller.tap('a')
+        elif direction == -1:
+            cls.controller.tap('a')
+        elif direction == -0:
+            cls.controller.tap('s')
+        elif direction == 1:
+            cls.controller.tap('d')
+        elif direction == 2:
+            cls.controller.tap('d')
+            cls.sleep()
+            cls.controller.tap('d')
+        else:
+            raise ValueError("Wrong direction.")
+        cls.direction = direction
 
     @classmethod
     def startGame(cls):
@@ -361,19 +364,20 @@ def main():
     # 初始化参数
     fps = 60  # 每秒读取帧数（不一定能达到）
     padding = 14  # 将矩形扩大该像素，防止误差
-    directionLevel = 2  # 改变方向级数（1、2）
-    ignoreGapFactor = 1.7  # 忽略缝隙系数（integrateRange 中的 k）
-    tolerantFrames = 30  # 容错，允许角色丢失的最大帧数
+    directionLevel = 1  # 改变方向级数（1、2）
+    ignoreGapFactor = 1.3  # 忽略缝隙系数（integrateRange 中的 k）
+    tolerantFrames = 45  # 容错/容忍，允许角色丢失的最大帧数
     visibility = 10  # 视野，决定能看见角色前面多远的障碍（单位为角色高度）（不一定越大越好）
     offset, captureSize = getCaptureRange()  # 捕获区域的起始偏移点 和 捕获区域的尺寸（建议全屏且 offset = (0,0)）
     doRecordFrames = True  # 是否记录游戏情景
-    output = "record.mp4"  # 游戏情景的输出文件
+    output = "record.avi"  # 游戏情景的输出文件
+    startRecordFrameNum = 90  # frameCount 达到 this 时开始记录游戏屏幕（获取大概帧率）
     fontThickness = 2  # 字厚度
-    fontScale = 4  # 子大小
+    fontScale = 4  # 字大小
     fontColor = (255, 0, 0)  # 字色
     fontFace = cv2.FONT_HERSHEY_PLAIN  # 字体
     clock = pygame.time.Clock()
-    ScreenCapture.resetRange_2point(offset, captureSize)  # edge 右置区域
+    ScreenCapture.resetRange_2point(offset, captureSize)  # 设置捕获区域
 
     print("打开新版 edge 浏览器，\n请打开 surf 并启用 surf 设置中的高可见性，\n启动全屏，\n然后敲击 G 键开始，\n点击 G 后请不要自己开始游戏，脚本会自动识别")
     with pynput.keyboard.Listener(
@@ -410,7 +414,6 @@ def main():
     hasChar = True  # 角色是否仍在屏幕中（若为 False 则超出了忍耐帧数）
     lostFrames = 0  # 角色丢失帧数
     frameCount = 0  # 帧计数
-    startRecordFrameNum = 120  # frameCount 达到 this 时开始记录游戏信息（防止帧率过大）
     videoWriter = None  # type:VideoWriter  # 游戏情况记录者
 
     while hasChar:
@@ -420,7 +423,7 @@ def main():
         # 过滤无影响矩形后，将矩形变为一维范围，合并，去除狭窄缝隙，防止陷入死路或 “z走” 死循环。
         rectangles_Rect = [inflateRect(pointsToRect(r), padding) for r in rectangles]  # 转换为 pygame.Rect 表达，并扩大
         rectangles_xRange = [(r.left, r.right) for r in rectangles_Rect
-                             if (charRect.centery + r.height * visibility + r.centery >
+                             if (charRect.centery + r.height * visibility >
                                  r.centery > charRect.centery)]  # 变为一维范围（过滤掉了无影响障碍与过远障碍（与视野有关））
         integratedRanges = integrateRange(charRect.width, ignoreGapFactor, rectangles_xRange)
         # print(charRect.width, ignoreGapFactor, rectangles_xRange,
@@ -444,22 +447,21 @@ def main():
 
         # 若角色存在（严格判定，不容忍） 改变方向 并 保存图像
         if lostFrames == 0:
-            changedDirection = True
+            changedDirection = False
             for range_ in integratedRanges:
                 # 判断障碍是否对着角色矩形，改变行动方向
-                if range_[0] <= charRect.left and charRect.right <= range_[1]:  # 角色两边都在障碍范围内，向右
-                    GameControl.changeDirection(directionLevel)
-                elif range_[0] <= charRect.left <= range_[1] or \
-                        range_[0] <= charRect.right <= range_[1]:  # 只有角色一边（左或右）在障碍范围内，向出路最短
-                    if charRect.centerx < sum(range_) / 2:
+                if range_[0] <= charRect.left <= range_[1] or \
+                        range_[0] <= charRect.right <= range_[1]:  # 角色一边（左或右或都）在障碍范围内，向出路最短
+                    if charRect.centerx < (sum(range_) / 2):
                         GameControl.changeDirection(-directionLevel)
                     else:
                         GameControl.changeDirection(directionLevel)
-                elif charRect.left <= range_[0] <= range_[1] <= charRect.right:  # 障碍范围在角色内，向左（其他情况被上面包括）
+                    changedDirection = True
+                elif charRect.left <= range_[0] and range_[1] <= charRect.right:  # 障碍范围在角色内，向左（其他情况被上面包括）
                     GameControl.changeDirection(directionLevel)
+                    changedDirection = True
                 else:
                     GameControl.changeDirection(0)  # 向下
-                    changedDirection = False
                 # 改变了方向，不再改变
                 if changedDirection:
                     break
@@ -475,7 +477,6 @@ def main():
                                charRect=[charRect.topleft, charRect.topright, charRect.bottomright,
                                          charRect.bottomleft])
                     text = GameControl.getDirectionInText()
-                    size, baseline = cv2.getTextSize(text, fontFace, fontScale, fontThickness)
                     cv2.putText(src, text, (100, 100), fontFace, fontScale, fontColor, thickness=fontThickness)
                     videoWriter.write(src)
         # 显示

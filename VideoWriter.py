@@ -12,13 +12,13 @@ warnings.simplefilter("always")
 class VideoWriter:
     def __init__(self, name, width, height, fps=25):
         # type: (str, int, int, int) -> None
-        if not name.endswith('.mp4'):  # 保证文件名的后缀是.mp4
-            name += '.mp4'
-            warnings.warn('video name should ends with ".mp4"')
+        if not name.endswith('.avi'):  # 保证文件名的后缀是.mp4
+            name += '.avi'
+            warnings.warn('video name should ends with ".avi"')
         self.__name = name  # 文件名
         self.__height = height  # 高
         self.__width = width  # 宽
-        fourcc = cv2.VideoWriter_fourcc(*'MPEG')  # 如果是avi视频，编码需要为MJPG
+        fourcc = cv2.VideoWriter_fourcc(*'MJPG')  # 如果是avi视频，编码需要为MJPG
         self.__writer = cv2.VideoWriter(name, fourcc, fps, (width, height))
 
     def write(self, frame: numpy.ndarray):
@@ -38,7 +38,7 @@ class VideoWriter:
 def main():
     width = 512
     height = 256
-    vw = VideoWriter('test.mp4', width, height)
+    vw = VideoWriter('test.avi', width, height)
     for i in range(25 * 50):
         # 随机生成一幅图像
         frame = np.random.randint(0, 255, (height, width, 3), dtype=np.uint8)
